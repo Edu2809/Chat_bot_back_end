@@ -3,13 +3,13 @@ from flask_cors import CORS
 import pandas as pd
 import gspread
 import google.generativeai as genai
-import os
 import time
 import threading
 import traceback
 import json
 import logging
-
+import os
+print(f"DEBUG_API_KEY_CHECK: {os.getenv('GOOGLE_GEMAI_API_KEY')}")
 # Configuração de Logging para debug
 logging.basicConfig(level=logging.INFO)
 
@@ -217,3 +217,4 @@ def chat():
 # O Gunicorn (servidor do Render) irá importar a instância 'app' diretamente.
 # Não precisamos do if __name__ == "__main__":
 # Para rodar localmente, use: gunicorn app:app -b 0.0.0.0:5000
+
