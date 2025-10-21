@@ -15,12 +15,23 @@ app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 # ======================== CONFIGURAÇÃO =========================
-# Configurar chave do Gemini. A chave é lida de uma variável de ambiente.
-# Certifique-se de que a variável GOOGLE_GENAI_API_KEY esteja definida no seu ambiente.
+
+# 🎯 PASSO 1: CHAVE API DO GEMINI
+# Insira sua chave API do Gemini COMPLETA (começa com 'AIzaSy...') aqui:
+GEMINI_API_KEY = "AIzaSyA-dwwt0-wPQglT7KaO8cPGtL5cIsL2Q-4" 
+# NOTA DE SEGURANÇA: Em produção, o ideal é usar 'os.environ.get("GOOGLE_GENAI_API_KEY")'
+
 try:
-    genai.configure(api_key=os.environ.get("GOOGLE_GENAI_API_KEY"))
+    if GEMINI_API_KEY != "AIzaSyA-dwwt0-wPQglT7KaO8cPGtL5cIsL2Q-4":
+        genai.configure(api_key=GEMINI_API_KEY)
+    elif os.environ.get("GOOGLE_GENAI_API_KEY"):
+         genai.configure(api_key=os.environ.get("GOOGLE_GENAI_API_KEY"))
+    else:
+        print("ATENÇÃO: Nenhuma chave Gemini válida foi encontrada. A API não funcionará.")
+
 except Exception as e:
     print(f"ATENÇÃO: Falha ao configurar a API do Gemini: {e}")
+
 
 # Carregar credenciais da Service Account para o Google Sheets (lidas de GOOGLE_CREDS_JSON)
 creds_json = os.environ.get("GOOGLE_CREDS_JSON")
