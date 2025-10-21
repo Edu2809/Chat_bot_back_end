@@ -159,7 +159,7 @@ Se não houver dados suficientes ou relevantes para responder, diga isso clarame
     def worker():
         """Função para ser executada na thread, contendo a chamada de API."""
         try:
-            model = genai.GenerativeModel("gemini-2.0-flash")
+            model = genai.GenerativeModel("gemini-2.5-flash")
             response = model.generate_content(prompt)
             # Tenta pegar o texto e garante que a resposta é sempre uma string
             result["text"] = getattr(response, "text", str(response))
@@ -217,4 +217,5 @@ def chat():
 # O Gunicorn (servidor do Render) irá importar a instância 'app' diretamente.
 # Não precisamos do if __name__ == "__main__":
 # Para rodar localmente, use: gunicorn app:app -b 0.0.0.0:5000
+
 
