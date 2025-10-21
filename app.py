@@ -1,16 +1,12 @@
-from flask import Flask, request, jsonify, render_template
-from flask_cors import CORS
-import pandas as pd
-import gspread
-import google.generativeai as genai
-import os
 import threading
 import time
 import math
+import json
 import traceback
 
 # ==========================================================
 # CONFIGURAÇÃO
+# CONFIGURAÇÃO BÁSICA
 # ==========================================================
 app = Flask(__name__, template_folder="templates")
 CORS(app)
@@ -20,25 +16,37 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "bot-qualquer-70634b3faced.json"
 
 # Configuração da Gemini API (mantenha sua chave segura)
 genai.configure(api_key=os.environ.get("GOOGLE_GENAI_API_KEY", "AIzaSyA-dwwt0-wPQglT7KaO8cPGtL5cIsL2Q-4"))
+# ==========================================================
+# CONFIGURAÇÃO DAS CREDENCIAIS GOOGLE
+# ==========================================================
+# No Render, crie uma variável chamada GOOGLE_CREDS_JSON com o conteúdo do seu JSON de service account.
+if os.environ.get("GOOGLE_CREDS_JSON"):
+    creds_dict = json.loads(os.environ["GOOGLE_CREDS_JSON"])
+    with open("service_account.json", "w") as f:
+        json.dump(creds_dict, f)
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "service_account.json"
+else:
+    raise Exception("❌ Variável de ambiente GOOGLE_CREDS_JSON não encontrada!")
+
+# Conecta ao Google Sheets
+gc = gspread.service_account(filename="service_account.json")
 
 # Cliente Google Sheets
 gc = gspread.service_account(filename=os.environ["GOOGLE_APPLICATION_CREDENTIALS"])
+# ==========================================================
+# CONFIGURAÇÃO DA GEMINI API
+# ==========================================================
+if not os.environ.get("GOOGLE_GENAI_API_KEY"):
+    raise Exception("❌ Variável de ambiente GOOGLE_GENAI_API_KEY não encontrada!")
+genai.configure(api_key=os.environ["GOOGLE_GENAI_API_KEY"])
 
 # ==========================================================
 # CONFIGURAÇÃO DAS PLANILHAS
+# LISTA DE PLANILHAS
 # ==========================================================
 SHEET_IDS = [
     "1oeKc3Z2O1ChhrM_SYnaJ21qg21xOqAigoFAxy9z-Hn4",  # Abril
-    "1HIOKU5lODnLpjLbtCo7nowrkl6sOv4Hnat6Mt6mnEPY",
-    "13r_ZwpyBbdtxb7e9_EhbXiIj1ezHvdL2XsQ-PdHHL70",
-    "1Jupk4ZW_wun3W8eCG6rLh8BpIBj6xqROhsLWOxW8eNQ",
-    "10zWcZWDAappBSqusteHPbpOqwHNjFEn0Qil0YGuvjuQ",
-    "1KsQoSXt33wwh3OSbJuRBgYVPSOSEXk3Y4vhJqhl9yc4",
-    "1c49j2cIEiGHaOc35ZbJkeRXp5gw2jHcVjMOKfgQJQTw",
-    "1bCWUUDuQWDCnqV2EFCWctrZH_NMZBXydT0qrmv7Xe0U",
-    "1OM3Vcg_lIMlXxKvqaes90PCUUwn-RThflgewSahu4zg",
-    "1N6_YgXpqRXLj5k9zRD4SWQy-KtYvmSWBy0h4rFZJ43s",
-    "19Ry0WTLla1D262QxjmQ8WNVbPwMnzBKo2S1FyEEZ8WA",
+@@ -42,222 +56,148 @@
     "1Sfs3bjIsNDOTmeWCwgveI61asAYyQNZPvuGFyDA7xeo"
 ]
 
@@ -48,13 +56,18 @@ CACHE_MAX_AGE_SECONDS = 10 * 60  # 10 minutos
 
 # ==========================================================
 # FUNÇÕES AUXILIARES
+# CACHE LOCAL (PARA RENDER)
 # ==========================================================
+CACHE_FILE = "/tmp/cache_combined.csv"  # Render permite gravação em /tmp
+CACHE_MAX_AGE_SECONDS = 15 * 60  # 15 minutos
+
 def is_cache_valid():
     if not os.path.exists(CACHE_FILE):
         return False
     mtime = os.path.getmtime(CACHE_FILE)
     age = time.time() - mtime
     return age <= CACHE_MAX_AGE_SECONDS
+    return (time.time() - mtime) <= CACHE_MAX_AGE_SECONDS
 
 def save_cache(df):
     try:
@@ -62,6 +75,7 @@ def save_cache(df):
         print(f"📥 Cache salvo em {CACHE_FILE}")
     except Exception as e:
         print("❌ Falha ao salvar cache:", e)
+    df.to_csv(CACHE_FILE, index=False)
 
 def load_cache():
     try:
@@ -71,10 +85,18 @@ def load_cache():
     except Exception as e:
         print("❌ Falha ao carregar cache:", e)
         return pd.DataFrame()
+    if os.path.exists(CACHE_FILE):
+        return pd.read_csv(CACHE_FILE)
+    return pd.DataFrame()
 
 def load_data(max_rows=5000):
     # Usa cache quando possível
+# ==========================================================
+# LEITURA DAS PLANILHAS (COM RETRY E CACHE)
+# ==========================================================
+def load_data(max_rows=8000):
     if is_cache_valid():
+        print("📤 Usando cache existente.")
         return load_cache()
 
     dfs = []
@@ -83,15 +105,21 @@ def load_data(max_rows=5000):
     for sheet_id in SHEET_IDS:
         tentativa = 0
         while tentativa < 4:  # até 4 tentativas com backoff
+        for tentativa in range(3):
             try:
                 sh = gc.open_by_key(sheet_id)
                 sheet = sh.sheet1
                 nome_planilha = sh.title
                 print(f"📄 Lendo planilha: {nome_planilha} ({sheet_id})")
+                ws = sh.sheet1
+                nome = sh.title
+                print(f"📄 Lendo planilha: {nome}")
 
                 df = pd.DataFrame(sheet.get_all_records())
+                df = pd.DataFrame(ws.get_all_records())
                 if df.empty:
                     print(f"⚠️ Planilha {nome_planilha} vazia — ignorada.")
+                    print(f"⚠️ {nome} vazia — ignorada.")
                     break
 
                 df["Planilha"] = nome_planilha
@@ -110,9 +138,11 @@ def load_data(max_rows=5000):
                     df = df.head(remaining)
 
                 total_rows += len(df)
+                df["Planilha"] = nome
                 dfs.append(df)
                 print(f"✅ {len(df)} linhas carregadas de {nome_planilha} (total até agora: {total_rows})")
                 break  # sucesso -> sai do while
+                total_rows += len(df)
 
             except Exception as e:
                 tentativa += 1
@@ -128,15 +158,25 @@ def load_data(max_rows=5000):
                 else:
                     # erro não recuperável para essa planilha -> pula
                     traceback.print_exc()
+                if total_rows >= max_rows:
+                    print("🔸 Limite de linhas atingido.")
                     break
 
         # pequena pausa entre planilhas para reduzir chance de throttling
         time.sleep(1.5)
+                time.sleep(1.2)  # reduz chance de rate limit
+                break
+            except Exception as e:
+                print(f"⚠️ Erro na {sheet_id} (tentativa {tentativa+1}): {e}")
+                time.sleep(2 ** tentativa)
+        else:
+            print(f"❌ Falha ao ler {sheet_id} — ignorando.")
 
     if dfs:
         combined = pd.concat(dfs, ignore_index=True)
         save_cache(combined)
         print(f"🔹 Total consolidado: {len(combined)} linhas em {len(dfs)} planilhas.")
+        print(f"✅ Total consolidado: {len(combined)} linhas em {len(dfs)} planilhas.")
         return combined
     else:
         print("⚠️ Nenhuma planilha foi carregada.")
@@ -150,10 +190,18 @@ def build_compact_sample(df, max_rows=200, max_columns=20):
     # Seleciona primeiras colunas (limitando a quantidade para evitar prompt gigantesco)
     cols = list(df.columns)[:max_columns]
     sample = df[cols].head(max_rows).copy()
+# ==========================================================
+# FUNÇÕES DE ANÁLISE
+# ==========================================================
+def build_compact_sample(df, max_rows=200, max_cols=20):
+    cols = list(df.columns)[:max_cols]
+    sample = df[cols].head(max_rows)
+    sample_csv = sample.to_csv(index=False)
 
     # Gerar resumo numérico reduzido
     numeric = df.select_dtypes(include="number")
     summary = None
+    summary_csv = ""
     if not numeric.empty:
         summary = numeric.describe().transpose().round(3)
         # converte para CSV compacto
@@ -162,6 +210,7 @@ def build_compact_sample(df, max_rows=200, max_columns=20):
         summary_csv = ""
 
     sample_csv = sample.to_csv(index=False)
+        summary_csv = numeric.describe().transpose().reset_index().to_csv(index=False)
     return sample_csv, summary_csv
 
 def gerar_insights_sync(prompt_text, result_container):
@@ -193,23 +242,29 @@ def gerar_insights_sync(prompt_text, result_container):
 def gerar_insights(pergunta, timeout_seconds=300):
     # carrega dados (usando cache quando possível)
     df = load_data(max_rows=5000)
+def gerar_resposta(pergunta, timeout=240):
+    df = load_data()
     if df.empty:
         return "❌ Não encontrei dados nas planilhas."
+        return "❌ Nenhum dado foi carregado."
 
     # Prepara amostra compacta + resumo estatístico para evitar overlength do prompt
     sample_csv, summary_csv = build_compact_sample(df, max_rows=200, max_columns=20)
+    sample_csv, summary_csv = build_compact_sample(df)
 
     prompt = f"""
 Você é um analista de vendas. Responda de forma analítica, clara e curta à pergunta:
 "{pergunta}"
-
+Você é um analista de vendas experiente.
+Baseando-se nos dados abaixo, responda de forma clara e objetiva:
+Pergunta: "{pergunta}"
 Resumo estatístico (colunas numéricas):
 {summary_csv}
-
 Aqui está uma amostra limitada dos dados (CSV):
+Amostra dos dados (limite 200 linhas):
 {sample_csv}
-
 Responda objetivamente e cite se a resposta se baseia na amostra (não nos dados completos).
+Diga se sua resposta foi inferida com base na amostra.
 """
 
     print("🧾 Prompt preparado — enviando ao modelo (tamanho aproximado:", len(prompt), "bytes )")
@@ -218,10 +273,24 @@ Responda objetivamente e cite se a resposta se baseia na amostra (não nos dados
     worker = threading.Thread(target=gerar_insights_sync, args=(prompt, result))
     worker.start()
     worker.join(timeout=timeout_seconds)
+    def worker():
+        try:
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            resp = model.generate_content(prompt)
+            result["text"] = getattr(resp, "text", str(resp)).strip()
+        except Exception as e:
+            traceback.print_exc()
+            result["error"] = str(e)
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join(timeout=timeout)
 
     if worker.is_alive():
         print("❌ Timeout na geração de insights pelo modelo.")
         return "⏱️ A análise demorou demais e foi cancelada. Tente uma pergunta menor ou aumente o timeout."
+    if t.is_alive():
+        return "⏱️ Tempo excedido. Pergunta muito complexa."
     if "error" in result:
         print("❌ Erro do modelo:", result.get("error"))
         return result["error"]
@@ -233,6 +302,8 @@ Responda objetivamente e cite se a resposta se baseia na amostra (não nos dados
         return resposta
     print("⚠️ Sem resposta do modelo — conteúdo de result:", result)
     return "❌ Sem resposta do modelo."
+        return f"❌ Erro: {result['error']}"
+    return result.get("text", "❌ Nenhuma resposta recebida.")
 
 # ==========================================================
 # ROTAS
@@ -240,12 +311,16 @@ Responda objetivamente e cite se a resposta se baseia na amostra (não nos dados
 @app.route("/")
 def index():
     return render_template("index.html")
+def home():
+    return "✅ Alpha Analyst API rodando."
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
     data = request.get_json() or {}
     user_input = data.get("message", "").strip()
     if not user_input:
+    user_msg = data.get("message", "").strip()
+    if not user_msg:
         return jsonify({"response": "Mensagem vazia."}), 400
 
     try:
@@ -255,9 +330,13 @@ def chat():
     except Exception as e:
         traceback.print_exc()
         return jsonify({"response": f"Erro: {str(e)}"}), 500
+    resposta = gerar_resposta(user_msg)
+    return jsonify({"response": resposta})
 
 # ==========================================================
 # INICIALIZAÇÃO
+# MAIN
 # ==========================================================
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
