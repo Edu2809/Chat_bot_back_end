@@ -1,8 +1,9 @@
 Flask
-python-dotenv
+flask-cors
 pandas
 openpyxl
-google-genai
-gunicorn
-flask_cors
 gspread
+google-genai 
+google-generativeai 
+gunicorn 
+python-dotenv
