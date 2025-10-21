@@ -1,5 +1,7 @@
-flask
-flask-cors
+Flask
+python-dotenv
 pandas
-gspread
-google-generativeai
+openpyxl
+google-genai
+gunicorn
+flask_cors
