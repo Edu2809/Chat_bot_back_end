@@ -5,3 +5,4 @@ openpyxl
 google-genai
 gunicorn
 flask_cors
+gspread
