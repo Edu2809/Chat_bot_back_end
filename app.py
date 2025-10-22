@@ -11,15 +11,19 @@ import traceback
 import json
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
 
-# ============================
-# Configurações globais
-# ============================
+CORS(app, supports_credentials=True, resources={
+    r"/*": {
+        "origins": [
+            "https://edu2809.github.io",     # seu GitHub Pages
+            "https://chat-bot-back-end-7.onrender.com"    # o próprio Render (opcional)
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "expose_headers": ["Content-Type"]
+    }
+})
 
-df_data = pd.DataFrame()
-data_lock = threading.Lock()
-gc = None
 
 # ✅ IDs das planilhas do Google Sheets
 SHEET_IDS = [
@@ -242,3 +246,4 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
